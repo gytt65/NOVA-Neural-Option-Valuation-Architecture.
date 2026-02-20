@@ -1,0 +1,30 @@
+streamlit>=1.52,<2
+plotly>=5.20
+pandas>=2.2
+numpy>=1.26
+scipy>=1.12
+scikit-learn>=1.5
+arch>=7.0
+google-generativeai>=0.8.5
+xgboost>=2.0
+lightgbm>=4.3
+hmmlearn>=0.3.3
+joblib>=1.3
+requests>=2.31
+websocket-client>=1.8
+pyotp>=2.9
+smartapi-python>=1.4.8
+# SmartAPI websocket/runtime dependencies (modern, Python-3.13 compatible)
+autobahn>=24.4.2
+twisted>=24.11.0
+txaio>=23.1.1
+zope.interface>=7.2
+attrs>=23.2
+automat>=24.8.1
+constantly>=23.10.4
+incremental>=24.7.2
+hyperlink>=21.0.0
+logzero>=1.7.0
+# Keep modern typing/cffi for Python 3.13 wheels.
+typing_extensions>=4.12
+cffi>=1.17
