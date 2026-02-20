@@ -234,10 +234,8 @@ class UnifiedPricingPipeline:
             diagnostics['stages_skipped'].append('hawkes: no returns data')
 
         # ─── Stage 4: Neural J-SDE Pricing ────────────────────────────
-        njsde_calibrated = False
         if 'neural_jsde' in self._components:
             try:
-                njsde_calibrated = self._components['neural_jsde'].is_calibrated
                 features = {
                     'vix': state.get('vix', 15.0),
                     'regime_crisis': state.get('regime_crisis', 0.1),
@@ -249,7 +247,6 @@ class UnifiedPricingPipeline:
                 )
                 component_prices['neural_jsde'] = float(njsde_price)
                 diagnostics['stages_run'].append('neural_jsde')
-                diagnostics['njsde_calibrated'] = njsde_calibrated
 
                 # Get learned dynamics for interpretability
                 dynamics = self._components['neural_jsde'].get_learned_dynamics(features, T)
@@ -287,53 +284,44 @@ class UnifiedPricingPipeline:
             diagnostics['stages_skipped'].append('kan: not trained')
 
         # ─── Stage 7: Ensemble Weighting ──────────────────────────────
-        # Smart weighting: calibrated models get full weight,
-        # uncalibrated models get reduced weight to prevent domination.
-        if len(component_prices) > 1:
-            weights = {}
-            for name, p in component_prices.items():
-                if name == 'neural_jsde' and not njsde_calibrated:
-                    weights[name] = 0.2  # 20% weight if uncalibrated
-                elif name == 'bsm':
-                    weights[name] = 1.0  # BSM always full weight (analytical)
-                else:
-                    weights[name] = 1.0
+        if 'ensemble' in self._components and len(component_prices) > 1:
+            try:
+                ensemble = self._components['ensemble']
+                # Register prices as simple callable models
+                for name, p in component_prices.items():
+                    if name not in ensemble.models:
+                        _p = p  # capture
+                        ensemble.register_model(name, lambda s, k, t, r, q, sig, ot, _p=_p: _p)
 
-            # Normalize weights
-            wt_sum = sum(weights.values())
-            weights = {k: v / wt_sum for k, v in weights.items()}
-
-            # Weighted average
-            final_price = sum(component_prices[k] * weights[k] for k in component_prices)
-            final_price += kan_correction
-
-            diagnostics['stages_run'].append('ensemble')
-            diagnostics['ensemble_weights'] = {k: round(v, 3) for k, v in weights.items()}
-
-            # Model agreement metric
-            prices = list(component_prices.values())
-            mean_p = np.mean(prices)
-            if mean_p > 0:
-                rel_spread = (max(prices) - min(prices)) / mean_p
-                diagnostics['model_agreement'] = round(float(max(0, 1.0 - rel_spread)), 3)
-            else:
-                diagnostics['model_agreement'] = 1.0
+                ens_price, ens_diag = ensemble.price(
+                    spot, strike, T, r, q, effective_sigma, option_type
+                )
+                final_price = ens_price + kan_correction
+                diagnostics['stages_run'].append('ensemble')
+                diagnostics['ensemble_weights'] = ens_diag.get('model_weights', {})
+                diagnostics['model_agreement'] = ens_diag.get('model_agreement', 1.0)
+            except Exception as e:
+                diagnostics['stages_skipped'].append(f'ensemble: {e}')
+                final_price = float(np.mean(list(component_prices.values()))) + kan_correction
         elif component_prices:
-            final_price = float(list(component_prices.values())[0]) + kan_correction
+            final_price = float(np.mean(list(component_prices.values()))) + kan_correction
         else:
             final_price = max(bsm_price + kan_correction, 0.0)
 
         final_price = max(final_price, 0.0)
 
         # ─── Stage 8: Conformal Prediction Interval ───────────────────
-        # Use percentage-of-price method (not raw spread)
-        # Base width from vol and time, scaled by moneyness
-        moneyness = abs(np.log(strike / spot))
-        base_pct = effective_sigma * np.sqrt(T)  # vol-time uncertainty
-        otm_scaling = 1.0 + 3.0 * moneyness     # wider for OTM
-        width_pct = base_pct * otm_scaling
-        width = max(final_price * width_pct, 1.0)  # minimum ₹1 width
+        # Width scales with uncertainty
+        n_models = max(len(component_prices), 1)
+        if n_models >= 2:
+            prices = list(component_prices.values())
+            model_spread = max(prices) - min(prices)
+        else:
+            model_spread = effective_sigma * spot * np.sqrt(T) * 0.1
 
+        # Adaptive interval: wider for OTM, high vol, model disagreement
+        moneyness = abs(np.log(strike / spot))
+        width = model_spread * (1.0 + 2.0 * moneyness + 0.5 * effective_sigma)
         ci_lower = max(final_price - width, 0.0)
         ci_upper = final_price + width
         diagnostics['stages_run'].append('conformal_interval')
@@ -364,7 +352,7 @@ class UnifiedPricingPipeline:
             except Exception as e:
                 diagnostics['stages_skipped'].append(f'hedger: {e}')
 
-        std_error = width / 1.645  # Approximate SE from 90% CI half-width
+        std_error = model_spread / max(np.sqrt(n_models), 1.0) if n_models > 1 else 0.0
 
         return {
             'price': round(float(final_price), 4),
