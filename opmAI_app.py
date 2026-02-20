@@ -16709,7 +16709,7 @@ if st.session_state.get('upstox_access_token'):
         "⚛ TVR Model",
         "🧿 NIRV Model",
         "🧠 OMEGA",
-        "🌌 NOVA Architecture",
+        "🌌 NOVA",
         "📈 Positions",
         "📄 Journal",
         "💵 Paper Trade",
@@ -21004,7 +21004,7 @@ if st.session_state.get('upstox_access_token'):
 
     # ============== TAB 9: NOVA ARCHITECTURE ==============
     with main_tabs[9]:
-        st.header("🌌 NOVA Architecture: Neural Option Valuation")
+        st.header("🌌 NOVA : Neural Option Valuation Architecture")
         st.markdown("The most advanced Nobel-level integration of Generative AI, PDE-constrained surfaces, Neural SDEs, and Deep Hedging.")
 
         if not st.session_state.get('parsed_option'):
